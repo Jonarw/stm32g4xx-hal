@@ -24,6 +24,7 @@ use embedded_hal::delay::DelayNs;
 use embedded_hal_old::adc::{Channel, OneShot};
 
 use self::config::ExternalTrigger12;
+use self::config::InjectedExternalTrigger12;
 
 #[cfg(any(
     feature = "stm32g471",
@@ -49,6 +50,18 @@ impl Vref {
     #[inline(always)]
     pub fn sample_to_millivolts(sample: u16) -> u16 {
         Self::sample_to_millivolts_ext(sample, VDDA_CALIB, config::Resolution::Twelve)
+    }
+
+    /// Converts a sample value to millivolts using calibrated VDDA and configured resolution
+    #[inline(always)]
+    pub fn sample_to_volts_ext(sample: u16, vdda: f32, resolution: config::Resolution) -> f32 {
+        let mx_s = resolution.to_max_sample();
+        (f32::from(sample) * vdda) / mx_s as f32
+    }
+    /// Converts a sample value to volts using calibrated VDDA and configured resolution
+    #[inline(always)]
+    pub fn sample_to_volts(sample: u16) -> f32 {
+        Self::sample_to_volts_ext(sample, VDDA_CALIB as f32, config::Resolution::Twelve)
     }
 }
 
@@ -174,7 +187,7 @@ pub mod config {
 
     /// The place in the sequence a given channel should be captured
     #[derive(Debug, PartialEq, PartialOrd, Copy, Clone)]
-    pub enum Sequence {
+    pub enum RegularSequence {
         /// 1
         One,
         /// 2
@@ -209,48 +222,84 @@ pub mod config {
         Sixteen,
     }
 
-    impl From<Sequence> for u8 {
-        fn from(s: Sequence) -> u8 {
+    /// The place in the sequence a given channel should be captured
+    #[derive(Debug, PartialEq, PartialOrd, Copy, Clone)]
+    pub enum InjectedSequence {
+        /// 1
+        One,
+        /// 2
+        Two,
+        /// 3
+        Three,
+        /// 4
+        Four,
+    }
+
+    impl From<RegularSequence> for u8 {
+        fn from(s: RegularSequence) -> u8 {
             match s {
-                Sequence::One => 0,
-                Sequence::Two => 1,
-                Sequence::Three => 2,
-                Sequence::Four => 3,
-                Sequence::Five => 4,
-                Sequence::Six => 5,
-                Sequence::Seven => 6,
-                Sequence::Eight => 7,
-                Sequence::Nine => 8,
-                Sequence::Ten => 9,
-                Sequence::Eleven => 10,
-                Sequence::Twelve => 11,
-                Sequence::Thirteen => 12,
-                Sequence::Fourteen => 13,
-                Sequence::Fifteen => 14,
-                Sequence::Sixteen => 15,
+                RegularSequence::One => 0,
+                RegularSequence::Two => 1,
+                RegularSequence::Three => 2,
+                RegularSequence::Four => 3,
+                RegularSequence::Five => 4,
+                RegularSequence::Six => 5,
+                RegularSequence::Seven => 6,
+                RegularSequence::Eight => 7,
+                RegularSequence::Nine => 8,
+                RegularSequence::Ten => 9,
+                RegularSequence::Eleven => 10,
+                RegularSequence::Twelve => 11,
+                RegularSequence::Thirteen => 12,
+                RegularSequence::Fourteen => 13,
+                RegularSequence::Fifteen => 14,
+                RegularSequence::Sixteen => 15,
             }
         }
     }
 
-    impl From<u8> for Sequence {
+    impl From<u8> for RegularSequence {
         fn from(bits: u8) -> Self {
             match bits {
-                0 => Sequence::One,
-                1 => Sequence::Two,
-                2 => Sequence::Three,
-                3 => Sequence::Four,
-                4 => Sequence::Five,
-                5 => Sequence::Six,
-                6 => Sequence::Seven,
-                7 => Sequence::Eight,
-                8 => Sequence::Nine,
-                9 => Sequence::Ten,
-                10 => Sequence::Eleven,
-                11 => Sequence::Twelve,
-                12 => Sequence::Thirteen,
-                13 => Sequence::Fourteen,
-                14 => Sequence::Fifteen,
-                15 => Sequence::Sixteen,
+                0 => RegularSequence::One,
+                1 => RegularSequence::Two,
+                2 => RegularSequence::Three,
+                3 => RegularSequence::Four,
+                4 => RegularSequence::Five,
+                5 => RegularSequence::Six,
+                6 => RegularSequence::Seven,
+                7 => RegularSequence::Eight,
+                8 => RegularSequence::Nine,
+                9 => RegularSequence::Ten,
+                10 => RegularSequence::Eleven,
+                11 => RegularSequence::Twelve,
+                12 => RegularSequence::Thirteen,
+                13 => RegularSequence::Fourteen,
+                14 => RegularSequence::Fifteen,
+                15 => RegularSequence::Sixteen,
+                _ => unimplemented!(),
+            }
+        }
+    }
+
+    impl From<InjectedSequence> for u8 {
+        fn from(s: InjectedSequence) -> u8 {
+            match s {
+                InjectedSequence::One => 0,
+                InjectedSequence::Two => 1,
+                InjectedSequence::Three => 2,
+                InjectedSequence::Four => 3,
+            }
+        }
+    }
+
+    impl From<u8> for InjectedSequence {
+        fn from(bits: u8) -> Self {
+            match bits {
+                0 => InjectedSequence::One,
+                1 => InjectedSequence::Two,
+                2 => InjectedSequence::Three,
+                3 => InjectedSequence::Four,
                 _ => unimplemented!(),
             }
         }
@@ -460,9 +509,9 @@ pub mod config {
         }
     }
 
-    /// Possible external triggers the ADC can listen to
+    /// Possible external triggers the ADC can listen to for regular sequences
     ///
-    /// This applies to ADC3, ADC4 and ADC5
+    /// This applies to ADC1, ADC2
     #[derive(Debug, Clone, Copy, Default)]
     pub enum ExternalTrigger12 {
         /// TIM1 compare channel 1
@@ -527,6 +576,76 @@ pub mod config {
         /// LP_timeout
         Lp_timeout,
         /// TIM7 trigger out
+        Tim_7_trgo,
+    }
+
+    /// Possible external triggers the ADC can listen to for injected sequences
+    /// RM0440 21.4.18 Table 167
+    /// This applies to ADC1, ADC2
+    #[derive(Debug, Clone, Copy, Default)]
+    pub enum InjectedExternalTrigger12 {
+        #[default]
+        /// TIM1 TRGO
+        Tim_1_trgo,
+        /// TIM1 CC4
+        Tim_1_cc_4,
+        /// TIM2 TRGO
+        Tim_2_trgo,
+        /// TIM2 CC1
+        Tim_2_cc_1,
+        /// TIM3 CC4
+        Tim_3_cc_4,
+        /// TIM4 TRGO
+        Tim_4_trgo,
+        /// EXTI 15
+        Exti_15,
+        /// TIM8 CC4
+        Tim_8_cc_4,
+        /// TIM1 TRGO2
+        Tim_1_trgo_2,
+        /// TIM8 TRGO
+        Tim_8_trgo,
+        /// TIM8 TRGO2
+        Tim_8_trgo_2,
+        /// TIM3 CC3
+        Tim_3_cc_3,
+        /// TIM3 TRGO
+        Tim_3_trgo,
+        /// TIM3 CC1
+        Tim_3_cc_1,
+        /// TIM6 TRGO
+        Tim_6_trgo,
+        /// TIM15 TRGO
+        Tim_15_trgo,
+        /// TIM20 TRGO
+        Tim_20_trgo,
+        /// TIM20 TRGO_2
+        Tim_20_trgo_2,
+        /// TIM20 CC4
+        Tim_20_cc_4,
+        /// HRTIM ADC Trigger 2
+        Hrtim_adc_trg_2,
+        /// HRTIM ADC Trigger 4        
+        Hrtim_adc_trg_4,
+        /// HRTIM ADC Trigger 5        
+        Hrtim_adc_trg_5,
+        /// HRTIM ADC Trigger 6        
+        Hrtim_adc_trg_6,
+        /// HRTIM ADC Trigger 7        
+        Hrtim_adc_trg_7,
+        /// HRTIM ADC Trigger 8        
+        Hrtim_adc_trg_8,
+        /// HRTIM ADC Trigger 9        
+        Hrtim_adc_trg_9,
+        /// HRTIM ADC Trigger 10        
+        Hrtim_adc_trg_10,
+        /// TIM16 CC1        
+        Tim_16_cc_1,
+        /// Reserved
+        Reserved,
+        /// LPTIM Out
+        Lptim_out,
+        /// TIM7 TRGO
         Tim_7_trgo,
     }
 
@@ -645,6 +764,44 @@ pub mod config {
                 ExternalTrigger12::Lp_timeout => 0b11101,
                 ExternalTrigger12::Tim_7_trgo => 0b11110,
                 // Reserved => 0b11111
+            }
+        }
+    }
+
+    impl From<InjectedExternalTrigger12> for u8 {
+        fn from(et: InjectedExternalTrigger12) -> u8 {
+            match et {
+                InjectedExternalTrigger12::Tim_1_trgo => 0b00000,
+                InjectedExternalTrigger12::Tim_1_cc_4 => 0b00001,
+                InjectedExternalTrigger12::Tim_2_trgo => 0b00010,
+                InjectedExternalTrigger12::Tim_2_cc_1 => 0b00011,
+                InjectedExternalTrigger12::Tim_3_cc_4 => 0b00100,
+                InjectedExternalTrigger12::Tim_4_trgo => 0b00101,
+                InjectedExternalTrigger12::Exti_15 => 0b00110,
+                InjectedExternalTrigger12::Tim_8_cc_4 => 0b00111,
+                InjectedExternalTrigger12::Tim_1_trgo_2 => 0b01000,
+                InjectedExternalTrigger12::Tim_8_trgo => 0b01001,
+                InjectedExternalTrigger12::Tim_8_trgo_2 => 0b01010,
+                InjectedExternalTrigger12::Tim_3_cc_3 => 0b01011,
+                InjectedExternalTrigger12::Tim_3_trgo => 0b01100,
+                InjectedExternalTrigger12::Tim_3_cc_1 => 0b01101,
+                InjectedExternalTrigger12::Tim_6_trgo => 0b01110,
+                InjectedExternalTrigger12::Tim_15_trgo => 0b01111,
+                InjectedExternalTrigger12::Tim_20_trgo => 0b10000,
+                InjectedExternalTrigger12::Tim_20_trgo_2 => 0b10001,
+                InjectedExternalTrigger12::Tim_20_cc_4 => 0b10010,
+                InjectedExternalTrigger12::Hrtim_adc_trg_2 => 0b10011,
+                InjectedExternalTrigger12::Hrtim_adc_trg_4 => 0b10100,
+                InjectedExternalTrigger12::Hrtim_adc_trg_5 => 0b10101,
+                InjectedExternalTrigger12::Hrtim_adc_trg_6 => 0b10110,
+                InjectedExternalTrigger12::Hrtim_adc_trg_7 => 0b10111,
+                InjectedExternalTrigger12::Hrtim_adc_trg_8 => 0b11000,
+                InjectedExternalTrigger12::Hrtim_adc_trg_9 => 0b11001,
+                InjectedExternalTrigger12::Hrtim_adc_trg_10 => 0b11010,
+                InjectedExternalTrigger12::Tim_16_cc_1 => 0b11011,
+                InjectedExternalTrigger12::Reserved => 0b11100,
+                InjectedExternalTrigger12::Lptim_out => 0b11101,
+                InjectedExternalTrigger12::Tim_7_trgo => 0b11110,
             }
         }
     }
@@ -941,16 +1098,18 @@ pub mod config {
     /// There are some additional parameters on the adc peripheral that can be
     /// added here when needed but this covers several basic usecases.
     #[derive(Debug, Clone, Copy)]
-    pub struct AdcConfig<ET> {
+    pub struct AdcConfig<ET, IET> {
         pub(crate) clock_mode: ClockMode,
         pub(crate) clock: Clock,
         pub(crate) resolution: Resolution,
         pub(crate) align: Align,
         pub(crate) external_trigger: (TriggerMode, ET),
+        pub(crate) external_trigger_injected: (TriggerMode, IET),
         pub(crate) continuous: Continuous,
         pub(crate) subgroup_len: SubGroupLength,
         pub(crate) dma: Dma,
-        pub(crate) end_of_conversion_interrupt: Eoc,
+        pub(crate) end_of_regular_conversion_interrupt: Eoc,
+        pub(crate) end_of_injected_conversion_interrupt: Eoc,
         pub(crate) overrun_interrupt: bool,
         pub(crate) default_sample_time: SampleTime,
         pub(crate) vdda: Option<u32>,
@@ -960,7 +1119,7 @@ pub mod config {
         pub difsel: DifferentialSelection,
     }
 
-    impl<ET> AdcConfig<ET> {
+    impl<ET, IET> AdcConfig<ET, IET> {
         /// change the clock_mode field
         #[inline(always)]
         pub fn clock_mode(mut self, clock_mode: ClockMode) -> Self {
@@ -1004,10 +1163,24 @@ pub mod config {
             self.dma = dma;
             self
         }
-        /// change the end_of_conversion_interrupt field
+
+        /// change the end_of_regular_conversion_interrupt field
         #[inline(always)]
-        pub fn end_of_conversion_interrupt(mut self, end_of_conversion_interrupt: Eoc) -> Self {
-            self.end_of_conversion_interrupt = end_of_conversion_interrupt;
+        pub fn end_of_regular_conversion_interrupt(
+            mut self,
+            end_of_regular_conversion_interrupt: Eoc,
+        ) -> Self {
+            self.end_of_regular_conversion_interrupt = end_of_regular_conversion_interrupt;
+            self
+        }
+
+        /// change the end_of_injected_conversion_interrupt field
+        #[inline(always)]
+        pub fn end_of_injected_conversion_interrupt(
+            mut self,
+            end_of_injected_conversion_interrupt: Eoc,
+        ) -> Self {
+            self.end_of_injected_conversion_interrupt = end_of_injected_conversion_interrupt;
             self
         }
 
@@ -1051,7 +1224,7 @@ pub mod config {
         }
     }
 
-    impl AdcConfig<ExternalTrigger12> {
+    impl AdcConfig<ExternalTrigger12, InjectedExternalTrigger12> {
         /// change the external_trigger field
         #[inline(always)]
         pub fn external_trigger(
@@ -1060,6 +1233,17 @@ pub mod config {
             trigger: ExternalTrigger12,
         ) -> Self {
             self.external_trigger = (trigger_mode, trigger);
+            self
+        }
+
+        /// change the external_trigger field
+        #[inline(always)]
+        pub fn external_trigger_injected(
+            mut self,
+            trigger_mode: TriggerMode,
+            trigger: InjectedExternalTrigger12,
+        ) -> Self {
+            self.external_trigger_injected = (trigger_mode, trigger);
             self
         }
     }
@@ -1086,7 +1270,7 @@ pub mod config {
         }
     }
 
-    impl<ET: Default> Default for AdcConfig<ET> {
+    impl<ET: Default, IET: Default> Default for AdcConfig<ET, IET> {
         fn default() -> Self {
             Self {
                 clock_mode: ClockMode::Synchronous_Div_1,
@@ -1094,10 +1278,12 @@ pub mod config {
                 resolution: Resolution::Twelve,
                 align: Align::Right,
                 external_trigger: (TriggerMode::Disabled, ET::default()),
+                external_trigger_injected: (TriggerMode::Disabled, IET::default()),
                 continuous: Continuous::Single,
                 subgroup_len: SubGroupLength::One,
                 dma: Dma::Disabled,
-                end_of_conversion_interrupt: Eoc::Disabled,
+                end_of_regular_conversion_interrupt: Eoc::Disabled,
+                end_of_injected_conversion_interrupt: Eoc::Disabled,
                 overrun_interrupt: false,
                 default_sample_time: SampleTime::Cycles_640_5,
                 vdda: None,
@@ -1122,26 +1308,38 @@ pub struct Configured;
 pub struct DMA;
 /// Type-State for Adc, indicating am active measuring peripheral
 #[derive(Debug)]
-pub struct Active;
+pub struct ActiveRegular;
+/// Type-State for Adc, indicating an ongoing injected conversion
+#[derive(Debug)]
+pub struct ActiveInjected;
 
 /// Enum for the wait_for_conversion_sequence function,
 /// which can return either a stopped ADC typestate or a
 /// continuing ADC typestate.
 pub enum Conversion<ADC: TriggerType> {
     /// Contains an Active Conversion ADC
-    Active(Adc<ADC, Active>),
+    ActiveRegular(Adc<ADC, ActiveRegular>),
+    /// Contains an Injected Conversion ADC
+    ActiveInjected(Adc<ADC, ActiveInjected>),
     /// Contains an Stopped ADC
     Stopped(Adc<ADC, Configured>),
 }
 impl<ADC: TriggerType> Conversion<ADC> {
     /// unwraps the enum and panics if the result is not an Active ADC
     #[inline(always)]
-    pub fn unwrap_active(self) -> Adc<ADC, Active> {
+    pub fn unwrap_active(self) -> Adc<ADC, ActiveRegular> {
         match self {
-            Conversion::Active(adc) => adc,
-            _ => {
-                panic!("Conversion is Stopped, not Active!")
-            }
+            Conversion::ActiveRegular(adc) => adc,
+            _ => panic!("Conversion not Active!"),
+        }
+    }
+
+    /// unwraps the enum and panics if the result is not an Active ADC
+    #[inline(always)]
+    pub fn unwrap_active_injected(self) -> Adc<ADC, ActiveInjected> {
+        match self {
+            Conversion::ActiveInjected(adc) => adc,
+            _ => panic!("Conversion not ActiveInjected!"),
         }
     }
 
@@ -1150,18 +1348,35 @@ impl<ADC: TriggerType> Conversion<ADC> {
     pub fn unwrap_stopped(self) -> Adc<ADC, Configured> {
         match self {
             Conversion::Stopped(adc) => adc,
-            _ => {
-                panic!("Conversion is Continuing, not Stopped!")
-            }
+            _ => panic!("Conversion not Stopped!"),
         }
     }
 
-    /// Returns true if the adc is Active.
+    /// Returns true if the adc is Active (regular or injected).
     #[inline(always)]
     pub fn is_active(&self) -> bool {
         match *self {
-            Conversion::Active(..) => true,
-            Conversion::Stopped(..) => false,
+            Conversion::ActiveRegular(..) => true,
+            Conversion::ActiveInjected(..) => true,
+            _ => false,
+        }
+    }
+
+    /// Returns true if the adc is Active (single conversion or regular sequence).
+    #[inline(always)]
+    pub fn is_active_regular(&self) -> bool {
+        match *self {
+            Conversion::ActiveRegular(..) => true,
+            _ => false,
+        }
+    }
+
+    /// Returns true if the adc is Active (injected sequence).
+    #[inline(always)]
+    pub fn is_active_injected(&self) -> bool {
+        match *self {
+            Conversion::ActiveInjected(..) => true,
+            _ => false,
         }
     }
 
@@ -1175,10 +1390,21 @@ impl<ADC: TriggerType> Conversion<ADC> {
     ///
     /// Converts self into an `Option<C>`, consuming self, and discarding the adc, if it is stopped.
     #[inline(always)]
-    pub fn active(self) -> Option<Adc<ADC, Active>> {
+    pub fn active_regular(self) -> Option<Adc<ADC, ActiveRegular>> {
         match self {
-            Conversion::Active(adc) => Some(adc),
-            Conversion::Stopped(..) => None,
+            Conversion::ActiveRegular(adc) => Some(adc),
+            _ => None,
+        }
+    }
+
+    /// Converts from `Conversion<C, E>` to `Option<C>`.
+    ///
+    /// Converts self into an `Option<C>`, consuming self, and discarding the adc, if it is stopped.
+    #[inline(always)]
+    pub fn active_injected(self) -> Option<Adc<ADC, ActiveInjected>> {
+        match self {
+            Conversion::ActiveInjected(adc) => Some(adc),
+            _ => None,
         }
     }
 
@@ -1188,8 +1414,8 @@ impl<ADC: TriggerType> Conversion<ADC> {
     #[inline(always)]
     pub fn stopped(self) -> Option<Adc<ADC, Configured>> {
         match self {
-            Conversion::Active(..) => None,
             Conversion::Stopped(adc) => Some(adc),
+            _ => None,
         }
     }
 }
@@ -1257,7 +1483,7 @@ impl<ADC: TriggerType> Conversion<ADC> {
 /// adc.configure_channel(&pa0, Sequence::One, SampleTime::Cycles_112);
 /// adc.configure_channel(&pa3, Sequence::Two, SampleTime::Cycles_480);
 /// adc.configure_channel(&pa0, Sequence::Three, SampleTime::Cycles_112);
-/// adc.start_conversion();
+/// adc.start_regular_conversion();
 /// ```
 ///
 /// ## External trigger
@@ -1286,10 +1512,10 @@ impl<ADC: TriggerType> Conversion<ADC> {
 ///
 ///  let config = AdcConfig::default()
 ///      //Set the trigger you want
-///      .external_trigger(TriggerMode::RisingEdge, ExternalTrigger::Tim_1_cc_1);
+///      .external_trigger_regular(TriggerMode::RisingEdge, ExternalTrigger::Tim_1_cc_1);
 ///  let mut adc = Adc::adc1(device.ADC1, true, config);
 ///  let pa0 = gpioa.pa0.into_analog();
-///  adc.configure_channel(&pa0, Sequence::One, SampleTime::Cycles_112);
+///  adc.configure_regular_channel(&pa0, Sequence::One, SampleTime::Cycles_112);
 ///  //Make sure it's enabled but don't start the conversion
 ///  adc.enable();
 ///
@@ -1325,7 +1551,7 @@ impl<ADC: TriggerType> Conversion<ADC> {
 #[derive(Clone, Copy)]
 pub struct DynamicAdc<ADC: TriggerType> {
     /// Current config of the ADC, kept up to date by the various set methods
-    config: config::AdcConfig<ADC::ExternalTrigger>,
+    config: config::AdcConfig<ADC::ExternalTrigger, ADC::InjectedExternalTrigger>,
     /// The adc peripheral
     adc_reg: ADC,
     /// VDDA in millivolts calculated from the factory calibration and vrefint
@@ -1393,7 +1619,7 @@ pub trait AdcClaim<TYPE: TriggerType> {
         self,
         cs: ClockSource,
         rcc: &Rcc,
-        config: config::AdcConfig<TYPE::ExternalTrigger>,
+        config: config::AdcConfig<TYPE::ExternalTrigger, TYPE::InjectedExternalTrigger>,
         delay: &mut impl DelayNs,
         reset: bool,
     ) -> Adc<TYPE, Configured>;
@@ -1405,8 +1631,10 @@ trait AdcConfig {
 
 /// Specifies what External trigger type the ADC uses
 pub trait TriggerType {
-    /// Specifies what External trigger type the ADC uses
+    /// Specifies what External trigger type the ADC uses for the regular sequence
     type ExternalTrigger: fmt::Debug;
+    /// Specifies what External trigger type the ADC uses for the injected sequence
+    type InjectedExternalTrigger: fmt::Debug;
 }
 
 #[inline(always)]
@@ -1556,10 +1784,11 @@ macro_rules! adc {
     (additionals: $adc_type:ident => ($common_type:ident)) => {
     };
 
-    ($($adc_type:ident => ($trigger_type:ident, $configure_clocks_fn_name:ident, $mux:expr, ($common_type:ident) )),+ $(,)*) => {
+    ($($adc_type:ident => ($regular_trigger_type:ident, $injected_trigger_type:ident, $configure_clocks_fn_name:ident, $mux:expr, ($common_type:ident) )),+ $(,)*) => {
         $(
             impl TriggerType for stm32::$adc_type {
-                type ExternalTrigger = $trigger_type;
+                type ExternalTrigger = $regular_trigger_type;
+                type InjectedExternalTrigger = $injected_trigger_type;
             }
 
             impl AdcConfig for stm32::$adc_type {
@@ -1574,6 +1803,12 @@ macro_rules! adc {
                 #[inline(always)]
                 pub fn sample_to_millivolts(&self, sample: u16) -> u16 {
                     Vref::sample_to_millivolts_ext(sample, self.calibrated_vdda, self.config.resolution)
+                }
+
+                /// Converts a sample value to volts using calibrated VDDA and configured resolution
+                #[inline(always)]
+                pub fn sample_to_volts(&self, sample: u16) -> f32 {
+                    Vref::sample_to_volts_ext(sample, self.calibrated_vdda as f32, self.config.resolution)
                 }
 
                 /// Disables the Voltage Regulator and release the ADC
@@ -1616,7 +1851,6 @@ macro_rules! adc {
                     self.adc_reg.cr.modify(|_, w| w.deeppwd().clear_bit());
                 }
 
-
                 /// Enables the Voltage Regulator
                 #[inline(always)]
                 pub fn enable_vreg(&mut self, delay: &mut impl DelayNs) {
@@ -1646,7 +1880,8 @@ macro_rules! adc {
                 #[inline(always)]
                 pub fn disable(&mut self) {
                     // Disable any ongoing conversions
-                    self.cancel_conversion();
+                    self.cancel_regular_conversion();
+                    self.cancel_injected_conversion();
 
                     // Turn off ADC
                     self.adc_reg.cr.modify(|_, w| w.addis().set_bit());
@@ -1671,7 +1906,8 @@ macro_rules! adc {
                     // Clear ready flag
                     self.adc_reg.isr.modify(|_, w| w.adrdy().set_bit());
 
-                    self.clear_end_of_conversion_flag();
+                    self.clear_end_of_regular_conversion_flag();
+                    self.clear_end_of_injected_conversion_flag();
                 }
 
                 /// enable the adc and configure for DMA.
@@ -1682,16 +1918,18 @@ macro_rules! adc {
 
                 /// Applies all fields in AdcConfig
                 #[inline(always)]
-                fn apply_config(&mut self, config: config::AdcConfig<$trigger_type>) {
+                fn apply_config(&mut self, config: config::AdcConfig<$regular_trigger_type, $injected_trigger_type>) {
                     self.set_clock_mode(config.clock_mode);
                     self.set_clock(config.clock);
                     self.set_resolution(config.resolution);
                     self.set_align(config.align);
-                    self.set_external_trigger(config.external_trigger);
+                    self.set_external_trigger_regular(config.external_trigger);
+                    self.set_external_trigger_injected(config.external_trigger_injected);
                     self.set_continuous(config.continuous);
                     self.set_subgroup_len(config.subgroup_len);
                     self.set_dma(config.dma);
-                    self.set_end_of_conversion_interrupt(config.end_of_conversion_interrupt);
+                    self.set_end_of_regular_conversion_interrupt(config.end_of_regular_conversion_interrupt);
+                    self.set_end_of_injected_conversion_interrupt(config.end_of_injected_conversion_interrupt);
                     self.set_overrun_interrupt(config.overrun_interrupt);
                     self.set_default_sample_time(config.default_sample_time);
                     self.set_channel_input_type(config.difsel);
@@ -1745,13 +1983,23 @@ macro_rules! adc {
                     self.adc_reg.cfgr.modify(|_, w| w.align().bit(align.into()));
                 }
 
-                /// Sets which external trigger to use and if it is disabled, rising, falling or both
+                /// Sets which external trigger to use for regular conversions and if it is disabled, rising, falling or both
                 #[inline(always)]
-                pub fn set_external_trigger(&mut self, (edge, extsel): (config::TriggerMode, $trigger_type)) {
+                pub fn set_external_trigger_regular(&mut self, (edge, extsel): (config::TriggerMode, $regular_trigger_type)) {
                     self.config.external_trigger = (edge, extsel);
                     self.adc_reg.cfgr.modify(|_, w| unsafe { w
                         .extsel().bits(extsel.into())
                         .exten().bits(edge.into())
+                    });
+                }
+
+                /// Sets which external trigger to use for injected conversions and if it is disabled, rising, falling or both
+                #[inline(always)]
+                pub fn set_external_trigger_injected(&mut self, (edge, extsel): (config::TriggerMode, $injected_trigger_type)) {
+                    self.config.external_trigger_injected = (edge, extsel);
+                    self.adc_reg.jsqr.modify(|_, w| unsafe { w
+                        .jextsel().bits(extsel.into())
+                        .jexten().bits(edge.into())
                     });
                 }
 
@@ -1797,11 +2045,11 @@ macro_rules! adc {
                     );
                 }
 
-                /// Sets if the end-of-conversion behaviour.
+                /// Sets if the end-of-conversion behaviour for regular sequence.
                 /// The end-of-conversion interrupt occur either per conversion or for the whole sequence.
                 #[inline(always)]
-                pub fn set_end_of_conversion_interrupt(&mut self, eoc: config::Eoc) {
-                    self.config.end_of_conversion_interrupt = eoc;
+                pub fn set_end_of_regular_conversion_interrupt(&mut self, eoc: config::Eoc) {
+                    self.config.end_of_regular_conversion_interrupt = eoc;
                     let (en, eocs) = match eoc {
                         config::Eoc::Disabled => (false, false),
                         config::Eoc::Conversion => (true, true),
@@ -1810,6 +2058,22 @@ macro_rules! adc {
                     self.adc_reg.ier.modify(|_, w|w
                         .eosie().bit(eocs)
                         .eocie().bit(en)
+                    );
+                }
+
+                /// Sets if the end-of-conversion behaviour for injected sequence.
+                /// The end-of-conversion interrupt occur either per conversion or for the whole sequence.
+                #[inline(always)]
+                pub fn set_end_of_injected_conversion_interrupt(&mut self, eoc: config::Eoc) {
+                    self.config.end_of_injected_conversion_interrupt = eoc;
+                    let (en, eocs) = match eoc {
+                        config::Eoc::Disabled => (false, false),
+                        config::Eoc::Conversion => (true, true),
+                        config::Eoc::Sequence => (true, false),
+                    };
+                    self.adc_reg.ier.modify(|_, w|w
+                        .jeosie().bit(eocs)
+                        .jeocie().bit(en)
                     );
                 }
 
@@ -1858,9 +2122,16 @@ macro_rules! adc {
 
                 /// Reset the sequence
                 #[inline(always)]
-                pub fn reset_sequence(&mut self) {
+                pub fn reset_regular_sequence(&mut self) {
                     //The reset state is One conversion selected
-                    self.adc_reg.sqr1.modify(|_, w| w.l().bits(config::Sequence::One.into()));
+                    self.adc_reg.sqr1.modify(|_, w| w.l().bits(config::RegularSequence::One.into()));
+                }
+
+                /// Reset the sequence
+                #[inline(always)]
+                pub fn reset_injected_sequence(&mut self) {
+                    //The reset state is One conversion selected
+                    self.adc_reg.jsqr.modify(|_, w| w.jl().bits(config::InjectedSequence::One.into()));
                 }
 
                 /// Returns the current sequence length. Primarily useful for configuring DMA.
@@ -1898,50 +2169,7 @@ macro_rules! adc {
                     self.calibrate(config::InputType::SingleEnded);
                 }
 
-                /// Configure a channel for sampling.
-                /// It will make sure the sequence is at least as long as the `sequence` provided.
-                /// # Arguments
-                /// * `channel` - channel to configure
-                /// * `sequence` - where in the sequence to sample the channel. Also called rank in some STM docs/code
-                /// * `sample_time` - how long to sample for. See datasheet and ref manual to work out how long you need\
-                ///     to sample for at a given ADC clock frequency
-                pub fn configure_channel<CHANNEL>(&mut self, _channel: &CHANNEL, sequence: config::Sequence, sample_time: config::SampleTime)
-                where
-                    CHANNEL: Channel<stm32::$adc_type, ID=u8>
-                {
-
-                    //Check the sequence is long enough
-                    self.adc_reg.sqr1.modify(|r, w| {
-                        let prev: config::Sequence = r.l().bits().into();
-                        if prev < sequence {
-                            w.l().bits(sequence.into())
-                        } else {
-                            w
-                        }
-                    });
-
-                    let channel = CHANNEL::channel();
-
-                    //Set the channel in the right sequence field
-                    match sequence {
-                        config::Sequence::One      => self.adc_reg.sqr1.modify(|_, w| unsafe {w.sq1().bits(channel) }),
-                        config::Sequence::Two      => self.adc_reg.sqr1.modify(|_, w| unsafe {w.sq2().bits(channel) }),
-                        config::Sequence::Three    => self.adc_reg.sqr1.modify(|_, w| unsafe {w.sq3().bits(channel) }),
-                        config::Sequence::Four     => self.adc_reg.sqr1.modify(|_, w| unsafe {w.sq4().bits(channel) }),
-                        config::Sequence::Five     => self.adc_reg.sqr2.modify(|_, w| unsafe {w.sq5().bits(channel) }),
-                        config::Sequence::Six      => self.adc_reg.sqr2.modify(|_, w| unsafe {w.sq6().bits(channel) }),
-                        config::Sequence::Seven    => self.adc_reg.sqr2.modify(|_, w| unsafe {w.sq7().bits(channel) }),
-                        config::Sequence::Eight    => self.adc_reg.sqr2.modify(|_, w| unsafe {w.sq8().bits(channel) }),
-                        config::Sequence::Nine     => self.adc_reg.sqr2.modify(|_, w| unsafe {w.sq9().bits(channel) }),
-                        config::Sequence::Ten      => self.adc_reg.sqr3.modify(|_, w| unsafe {w.sq10().bits(channel) }),
-                        config::Sequence::Eleven   => self.adc_reg.sqr3.modify(|_, w| unsafe {w.sq11().bits(channel) }),
-                        config::Sequence::Twelve   => self.adc_reg.sqr3.modify(|_, w| unsafe {w.sq12().bits(channel) }),
-                        config::Sequence::Thirteen => self.adc_reg.sqr3.modify(|_, w| unsafe {w.sq13().bits(channel) }),
-                        config::Sequence::Fourteen => self.adc_reg.sqr3.modify(|_, w| unsafe {w.sq14().bits(channel) }),
-                        config::Sequence::Fifteen  => self.adc_reg.sqr4.modify(|_, w| unsafe {w.sq15().bits(channel) }),
-                        config::Sequence::Sixteen  => self.adc_reg.sqr4.modify(|_, w| unsafe {w.sq16().bits(channel) }),
-                    }
-
+                fn set_sample_time(&mut self, channel: u8, sample_time: config::SampleTime) {
                     //Set the sample time for the channel
                     let st = u8::from(sample_time);
                     match channel {
@@ -1967,8 +2195,90 @@ macro_rules! adc {
                         _ => unimplemented!(),
                     }
                 }
+
+                /// Configure a regular channel for sampling.
+                /// It will make sure the sequence is at least as long as the `sequence` provided.
+                /// # Arguments
+                /// * `channel` - channel to configure
+                /// * `sequence` - where in the sequence to sample the channel. Also called rank in some STM docs/code
+                /// * `sample_time` - how long to sample for. See datasheet and ref manual to work out how long you need\
+                ///     to sample for at a given ADC clock frequency
+                pub fn configure_regular_channel<CHANNEL>(&mut self, _channel: &CHANNEL, sequence: config::RegularSequence, sample_time: config::SampleTime)
+                where
+                    CHANNEL: Channel<stm32::$adc_type, ID=u8>
+                {
+                    //Check the sequence is long enough
+                    self.adc_reg.sqr1.modify(|r, w| {
+                        let prev: config::RegularSequence = r.l().bits().into();
+                        if prev < sequence {
+                            w.l().bits(sequence.into())
+                        } else {
+                            w
+                        }
+                    });
+
+                    let channel = CHANNEL::channel();
+
+                    //Set the channel in the right sequence field
+                    match sequence {
+                        config::RegularSequence::One      => self.adc_reg.sqr1.modify(|_, w| unsafe {w.sq1().bits(channel) }),
+                        config::RegularSequence::Two      => self.adc_reg.sqr1.modify(|_, w| unsafe {w.sq2().bits(channel) }),
+                        config::RegularSequence::Three    => self.adc_reg.sqr1.modify(|_, w| unsafe {w.sq3().bits(channel) }),
+                        config::RegularSequence::Four     => self.adc_reg.sqr1.modify(|_, w| unsafe {w.sq4().bits(channel) }),
+                        config::RegularSequence::Five     => self.adc_reg.sqr2.modify(|_, w| unsafe {w.sq5().bits(channel) }),
+                        config::RegularSequence::Six      => self.adc_reg.sqr2.modify(|_, w| unsafe {w.sq6().bits(channel) }),
+                        config::RegularSequence::Seven    => self.adc_reg.sqr2.modify(|_, w| unsafe {w.sq7().bits(channel) }),
+                        config::RegularSequence::Eight    => self.adc_reg.sqr2.modify(|_, w| unsafe {w.sq8().bits(channel) }),
+                        config::RegularSequence::Nine     => self.adc_reg.sqr2.modify(|_, w| unsafe {w.sq9().bits(channel) }),
+                        config::RegularSequence::Ten      => self.adc_reg.sqr3.modify(|_, w| unsafe {w.sq10().bits(channel) }),
+                        config::RegularSequence::Eleven   => self.adc_reg.sqr3.modify(|_, w| unsafe {w.sq11().bits(channel) }),
+                        config::RegularSequence::Twelve   => self.adc_reg.sqr3.modify(|_, w| unsafe {w.sq12().bits(channel) }),
+                        config::RegularSequence::Thirteen => self.adc_reg.sqr3.modify(|_, w| unsafe {w.sq13().bits(channel) }),
+                        config::RegularSequence::Fourteen => self.adc_reg.sqr3.modify(|_, w| unsafe {w.sq14().bits(channel) }),
+                        config::RegularSequence::Fifteen  => self.adc_reg.sqr4.modify(|_, w| unsafe {w.sq15().bits(channel) }),
+                        config::RegularSequence::Sixteen  => self.adc_reg.sqr4.modify(|_, w| unsafe {w.sq16().bits(channel) }),
+                    }
+
+                    self.set_sample_time(channel, sample_time);
+                }
+
+                /// Configure an injected channel for sampling.
+                /// It will make sure the sequence is at least as long as the `sequence` provided.
+                /// # Arguments
+                /// * `channel` - channel to configure
+                /// * `sequence` - where in the sequence to sample the channel. Also called rank in some STM docs/code
+                /// * `sample_time` - how long to sample for. See datasheet and ref manual to work out how long you need\
+                ///     to sample for at a given ADC clock frequency
+                pub fn configure_injected_channel<CHANNEL>(&mut self, _channel: &CHANNEL, sequence: config::InjectedSequence, sample_time: config::SampleTime)
+                where
+                    CHANNEL: Channel<stm32::$adc_type, ID=u8>
+                {
+
+                    //Check the sequence is long enough
+                    self.adc_reg.jsqr.modify(|r, w| {
+                        let prev: config::InjectedSequence = r.jl().bits().into();
+                        if prev < sequence {
+                            w.jl().bits(sequence.into())
+                        } else {
+                            w
+                        }
+                    });
+
+                    let channel = CHANNEL::channel();
+
+                    //Set the channel in the right sequence field
+                    match sequence {
+                        config::InjectedSequence::One   => self.adc_reg.jsqr.modify(|_, w| unsafe {w.jsq1().bits(channel) }),
+                        config::InjectedSequence::Two   => self.adc_reg.jsqr.modify(|_, w| unsafe {w.jsq2().bits(channel) }),
+                        config::InjectedSequence::Three => self.adc_reg.jsqr.modify(|_, w| unsafe {w.jsq3().bits(channel) }),
+                        config::InjectedSequence::Four  => self.adc_reg.jsqr.modify(|_, w| unsafe {w.jsq4().bits(channel) }),
+                    }
+
+                    self.set_sample_time(channel, sample_time);
+                }
+
                 /// Synchronously convert a single sample
-                /// Note that it reconfigures the adc sequence and doesn't restore it
+                /// Note that it reconfigures the regular adc sequence and doesn't restore it
                 pub fn convert<PIN>(&mut self, pin: &PIN, sample_time: config::SampleTime) -> u16
                 where
                     PIN: Channel<stm32::$adc_type, ID=u8>
@@ -1984,14 +2294,14 @@ macro_rules! adc {
                     );
 
                     self.enable();
-                    self.reset_sequence();
-                    self.configure_channel(pin, config::Sequence::One, sample_time);
-                    self.start_conversion();
+                    self.reset_regular_sequence();
+                    self.configure_regular_channel(pin, config::RegularSequence::One, sample_time);
+                    self.start_regular_conversion();
 
                     //Wait for the sequence to complete
-                    self.wait_for_conversion_sequence();
+                    self.wait_for_regular_conversion_sequence();
 
-                    let result = self.current_sample();
+                    let result = self.current_regular_sample();
 
                     self.disable();
 
@@ -2001,35 +2311,71 @@ macro_rules! adc {
                     result
                 }
 
-                /// Resets the end-of-conversion flag
+                /// Resets the end-of-conversion flag (regular)
                 #[inline(always)]
-                pub fn clear_end_of_conversion_flag(&mut self) {
+                pub fn clear_end_of_regular_conversion_flag(&mut self) {
                     self.adc_reg.isr.modify(|_, w| w.eoc().set_bit());
                 }
 
-                /// Block until the conversion is completed and return to configured
-                pub fn wait_for_conversion_sequence(&mut self) {
+                /// Resets the end-of-conversion flag (injected)
+                #[inline(always)]
+                pub fn clear_end_of_injected_conversion_flag(&mut self) {
+                    self.adc_reg.isr.modify(|_, w| w.jeoc().set_bit());
+                }
+
+                /// Block until the regular conversion is completed
+                pub fn wait_for_regular_conversion_sequence(&mut self) {
                     while !self.adc_reg.isr.read().eoc().bit_is_set() {}
+                }
+
+                /// Block until the injected conversion is completed
+                pub fn wait_for_injected_conversion_sequence(&mut self) {
+                    while !self.adc_reg.isr.read().jeoc().bit_is_set() {}
                 }
 
                 /// get current sample
                 #[inline(always)]
-                pub fn current_sample(&self) -> u16 {
+                pub fn current_regular_sample(&self) -> u16 {
                     self.adc_reg.dr.read().rdata().bits()
                 }
 
-                /// Starts conversion sequence. Waits for the hardware to indicate it's actually started.
+                /// get current sample
                 #[inline(always)]
-                pub fn start_conversion(&mut self) {
+                pub fn current_injected_sample(&self, injected_channel: config::InjectedSequence) -> u16 {
+                    match (injected_channel) {
+                        config::InjectedSequence::One => self.adc_reg.jdr1.read().jdata().bits(),
+                        config::InjectedSequence::Two => self.adc_reg.jdr2.read().jdata().bits(),
+                        config::InjectedSequence::Three => self.adc_reg.jdr3.read().jdata().bits(),
+                        config::InjectedSequence::Four => self.adc_reg.jdr4.read().jdata().bits(),
+                    }
+                }
+
+                /// Starts regular conversion sequence.
+                #[inline(always)]
+                pub fn start_regular_conversion(&mut self) {
                     //Start conversion
                     self.adc_reg.cr.modify(|_, w| w.adstart().set_bit());
                 }
 
-                /// Cancels an ongoing conversion
+                /// Starts injected conversion sequence.
                 #[inline(always)]
-                pub fn cancel_conversion(&mut self) {
+                pub fn start_injected_conversion(&mut self) {
+                    //Start conversion
+                    self.adc_reg.cr.modify(|_, w| w.jadstart().set_bit());
+                }
+
+                /// Cancels an ongoing regular conversion
+                #[inline(always)]
+                pub fn cancel_regular_conversion(&mut self) {
                     self.adc_reg.cr.modify(|_, w| w.adstp().set_bit());
                     while self.adc_reg.cr.read().adstart().bit_is_set() {}
+                }
+
+                /// Cancels an ongoing injected conversion
+                #[inline(always)]
+                pub fn cancel_injected_conversion(&mut self) {
+                    self.adc_reg.cr.modify(|_, w| w.jadstp().set_bit());
+                    while self.adc_reg.cr.read().jadstart().bit_is_set() {}
                 }
 
                 /// Returns if the Voltage Regulator is enabled
@@ -2046,8 +2392,14 @@ macro_rules! adc {
 
                 /// Returns if a conversion is active
                 #[inline(always)]
-                pub fn is_conversion_active(&self) -> bool {
+                pub fn is_regular_conversion_active(&self) -> bool {
                     self.adc_reg.cr.read().adstart().bit_is_set()
+                }
+
+                /// Returns if an injected conversion is active
+                #[inline(always)]
+                pub fn is_injected_conversion_active(&self) -> bool {
+                    self.adc_reg.cr.read().jadstart().bit_is_set()
                 }
 
                 /// Enables the vbat internal channel
@@ -2152,7 +2504,7 @@ macro_rules! adc {
 
                 /// claims and configures the Adc
                 #[inline(always)]
-                fn claim_and_configure(self, cs: ClockSource, rcc: &Rcc, config: config::AdcConfig<$trigger_type>, delay: &mut impl DelayNs, reset :bool) -> Adc<stm32::$adc_type, Configured> {
+                fn claim_and_configure(self, cs: ClockSource, rcc: &Rcc, config: config::AdcConfig<$regular_trigger_type, $injected_trigger_type>, delay: &mut impl DelayNs, reset :bool) -> Adc<stm32::$adc_type, Configured> {
                     let mut adc = self.claim(cs, rcc, delay, reset);
                     adc.adc.config = config;
 
@@ -2170,6 +2522,12 @@ macro_rules! adc {
                 #[inline(always)]
                 pub fn sample_to_millivolts(&self, sample: u16) -> u16 {
                     self.adc.sample_to_millivolts(sample)
+                }
+
+                /// Converts a sample value to volts using calibrated VDDA and configured resolution
+                #[inline(always)]
+                pub fn sample_to_volts(&self, sample: u16) -> f32 {
+                    self.adc.sample_to_volts(sample)
                 }
             }
 
@@ -2213,8 +2571,11 @@ macro_rules! adc {
                 /// This will put the adc in power down state.
                 #[inline(always)]
                 pub fn from_dynamic_adc(mut dynadc: DynamicAdc<stm32::$adc_type>) -> Self {
-                    if dynadc.is_conversion_active() {
-                        dynadc.cancel_conversion();
+                    if dynadc.is_regular_conversion_active() {
+                        dynadc.cancel_regular_conversion();
+                    }
+                    if dynadc.is_injected_conversion_active() {
+                        dynadc.cancel_injected_conversion();
                     }
                     if dynadc.is_enabled() {
                         dynadc.disable();
@@ -2261,7 +2622,7 @@ macro_rules! adc {
 
                 /// Enables the adc
                 #[inline(always)]
-                pub fn configure_and_enable(mut self, config: config::AdcConfig<$trigger_type>) -> Adc<stm32::$adc_type, Configured> {
+                pub fn configure_and_enable(mut self, config: config::AdcConfig<$regular_trigger_type, $injected_trigger_type>) -> Adc<stm32::$adc_type, Configured> {
                     self.adc.apply_config(config);
                     self.enable()
                 }
@@ -2323,10 +2684,16 @@ macro_rules! adc {
                     self.adc.set_align(align)
                 }
 
-                /// Sets which external trigger to use and if it is disabled, rising, falling or both
+                /// Sets which external trigger to use for the regular sequence and if it is disabled, rising, falling or both
                 #[inline(always)]
-                pub fn set_external_trigger(&mut self, (edge, extsel): (config::TriggerMode, $trigger_type)) {
-                    self.adc.set_external_trigger( (edge, extsel) )
+                pub fn set_external_trigger_regular(&mut self, (edge, extsel): (config::TriggerMode, $regular_trigger_type)) {
+                    self.adc.set_external_trigger_regular( (edge, extsel) )
+                }
+
+                /// Sets which external trigger to use for the injected sequence and if it is disabled, rising, falling or both
+                #[inline(always)]
+                pub fn set_external_trigger_injected(&mut self, (edge, extsel): (config::TriggerMode, $injected_trigger_type)) {
+                    self.adc.set_external_trigger_injected( (edge, extsel) )
                 }
 
                 /// Sets auto delay to true or false
@@ -2355,8 +2722,15 @@ macro_rules! adc {
                 /// Sets if the end-of-conversion behaviour.
                 /// The end-of-conversion interrupt occur either per conversion or for the whole sequence.
                 #[inline(always)]
-                pub fn set_end_of_conversion_interrupt(&mut self, eoc: config::Eoc) {
-                    self.adc.set_end_of_conversion_interrupt(eoc)
+                pub fn set_end_of_regular_conversion_interrupt(&mut self, eoc: config::Eoc) {
+                    self.adc.set_end_of_regular_conversion_interrupt(eoc)
+                }
+
+                /// Sets if the end-of-conversion behaviour.
+                /// The end-of-conversion interrupt occur either per conversion or for the whole sequence.
+                #[inline(always)]
+                pub fn set_end_of_injected_conversion_interrupt(&mut self, eoc: config::Eoc) {
+                    self.adc.set_end_of_injected_conversion_interrupt(eoc)
                 }
 
                 /// Enable/disable overrun interrupt
@@ -2381,10 +2755,16 @@ macro_rules! adc {
                     self.adc.set_channel_input_type(df)
                 }
 
-                /// Reset the sequence
+                /// Reset the regular sequence
                 #[inline(always)]
-                pub fn reset_sequence(&mut self) {
-                    self.adc.reset_sequence()
+                pub fn reset_regular_sequence(&mut self) {
+                    self.adc.reset_regular_sequence()
+                }
+
+                /// Reset the injected sequence
+                #[inline(always)]
+                pub fn reset_injected_sequence(&mut self) {
+                    self.adc.reset_injected_sequence()
                 }
 
                 /// Returns the current sequence length. Primarily useful for configuring DMA.
@@ -2413,15 +2793,33 @@ macro_rules! adc {
                 /// * `sample_time` - how long to sample for. See datasheet and ref manual to work out how long you need\
                 ///     to sample for at a given ADC clock frequency
                 #[inline(always)]
-                pub fn configure_channel<CHANNEL>(&mut self, channel: &CHANNEL, sequence: config::Sequence, sample_time: config::SampleTime)
+                pub fn configure_regular_channel<CHANNEL>(&mut self, channel: &CHANNEL, sequence: config::RegularSequence, sample_time: config::SampleTime)
                 where
                     CHANNEL: Channel<stm32::$adc_type, ID=u8>
                 {
-                    self.adc.configure_channel(channel, sequence, sample_time)
+                    self.adc.configure_regular_channel(channel, sequence, sample_time)
+                }
+
+                /// Configure an injected channel for sampling.
+                /// It will make sure the sequence is at least as long as the `sequence` provided.
+                /// Note that you CAN configure the same channel to be used in both a regular and injected sequence; the
+                /// sample time register is shared between the two however, so the sample_time value provided to this fn
+                /// will also affect the sample time used for the same channel used in a regular sequence and vice versa.
+                /// # Arguments
+                /// * `channel` - channel to configure
+                /// * `sequence` - where in the sequence to sample the channel. Also called rank in some STM docs/code
+                /// * `sample_time` - how long to sample for. See datasheet and ref manual to work out how long you need\
+                ///     to sample for at a given ADC clock frequency
+                #[inline(always)]
+                pub fn configure_injected_channel<CHANNEL>(&mut self, channel: &CHANNEL, sequence: config::InjectedSequence, sample_time: config::SampleTime)
+                where
+                    CHANNEL: Channel<stm32::$adc_type, ID=u8>
+                {
+                    self.adc.configure_injected_channel(channel, sequence, sample_time)
                 }
 
                 /// Synchronously convert a single sample
-                /// Note that it reconfigures the adc sequence and doesn't restore it
+                /// Note that it reconfigures the regular adc sequence and doesn't restore it
                 #[inline(always)]
                 pub fn convert<PIN>(&mut self, pin: &PIN, sample_time: config::SampleTime) -> u16
                 where
@@ -2445,11 +2843,11 @@ macro_rules! adc {
                     }
                 }
 
-                /// Starts conversion sequence. Waits for the hardware to indicate it's actually started.
+                /// Starts regular conversion sequence. Waits for the hardware to indicate it's actually started.
                 #[inline(always)]
-                pub fn start_conversion(mut self) -> Adc<stm32::$adc_type, Active> {
-                    self.adc.clear_end_of_conversion_flag();
-                    self.adc.start_conversion();
+                pub fn start_regular_conversion(mut self) -> Adc<stm32::$adc_type, ActiveRegular> {
+                    self.adc.clear_end_of_regular_conversion_flag();
+                    self.adc.start_regular_conversion();
 
                     Adc {
                         adc: self.adc,
@@ -2457,27 +2855,45 @@ macro_rules! adc {
                     }
                 }
 
-                /// Returns the current sample stored in the ADC data register
+                /// Starts injected conversion sequence. Waits for the hardware to indicate it's actually started.
                 #[inline(always)]
-                pub fn current_sample(&self) -> u16 {
-                    self.adc.current_sample()
+                pub fn start_injected_conversion(mut self) -> Adc<stm32::$adc_type, ActiveInjected> {
+                    self.adc.clear_end_of_injected_conversion_flag();
+                    self.adc.start_injected_conversion();
+
+                    Adc {
+                        adc: self.adc,
+                        _status: PhantomData,
+                    }
+                }
+
+                /// Returns the current regular sample stored in the ADC data register
+                #[inline(always)]
+                pub fn current_regular_sample(&self) -> u16 {
+                    self.adc.current_regular_sample()
+                }
+
+                /// Returns the current injected sample stored in the ADC data register
+                #[inline(always)]
+                pub fn current_injected_sample(&self, injected_channel: config::InjectedSequence) -> u16 {
+                    self.adc.current_injected_sample(injected_channel)
                 }
 
                 /// Synchronously convert a single sample
-                /// Note that it reconfigures the adc sequence and doesn't restore it
+                /// Note that it reconfigures the regular adc sequence and doesn't restore it
                 #[inline(always)]
                 pub fn convert<PIN>(&mut self, pin: &PIN, sample_time: config::SampleTime) -> u16
                 where
                     PIN: Channel<stm32::$adc_type, ID=u8>
                 {
-                    self.adc.reset_sequence();
-                    self.adc.configure_channel(pin, config::Sequence::One, sample_time);
-                    self.adc.start_conversion();
+                    self.adc.reset_regular_sequence();
+                    self.adc.configure_regular_channel(pin, config::RegularSequence::One, sample_time);
+                    self.adc.start_regular_conversion();
 
                     //Wait for the sequence to complete
-                    self.adc.wait_for_conversion_sequence();
+                    self.adc.wait_for_regular_conversion_sequence();
 
-                    self.adc.current_sample()
+                    self.adc.current_regular_sample()
                 }
             }
 
@@ -2485,17 +2901,20 @@ macro_rules! adc {
                 /// Wait in a potential infite loop untill the ADC has stopped the conversion.
                 /// Everytime an sample is retrieved 'func' is called.
                 /// Note: when the ADC has stopped the conversion, for the last sample, func is NOT run.
-                pub fn wait_untill_stopped<F>(mut self, mut func: F) -> Adc<stm32::$adc_type, Configured> where F: FnMut(u16, &Adc<stm32::$adc_type, Active>) {
+                pub fn wait_until_stopped<F>(mut self, mut func: F) -> Adc<stm32::$adc_type, Configured> where F: FnMut(u16, &Adc<stm32::$adc_type, ActiveRegular>) {
                     let adc = loop {
                         match self {
                             Conversion::Stopped(adc) => break adc,
-                            Conversion::Active(adc) => {
+                            Conversion::ActiveInjected(adc) => {
+                                return adc.wait_for_conversion_sequence();
+                            },
+                            Conversion::ActiveRegular(adc) => {
                                 self = adc.wait_for_conversion_sequence();
-                                if let Conversion::Active(adc) = self {
+                                if let Conversion::ActiveRegular(adc) = self {
                                     let sample = adc.current_sample();
                                     func(sample, &adc);
 
-                                    self = Conversion::Active(adc);
+                                    self = Conversion::ActiveRegular(adc);
                                 }
                             }
                         }
@@ -2504,12 +2923,12 @@ macro_rules! adc {
                 }
             }
 
-            impl Adc<stm32::$adc_type, Active> {
+            impl Adc<stm32::$adc_type, ActiveRegular> {
                 /// Block until the conversion is completed and return to configured
                 pub fn wait_for_conversion_sequence(mut self) -> Conversion<stm32::$adc_type> {
-                    self.adc.wait_for_conversion_sequence();
+                    self.adc.wait_for_regular_conversion_sequence();
 
-                    if !self.adc.is_conversion_active() {
+                    if !self.adc.is_regular_conversion_active() {
                         let inactive: Adc<_, Configured> = Adc {
                             adc: self.adc,
                             _status: PhantomData,
@@ -2518,7 +2937,7 @@ macro_rules! adc {
                         Conversion::Stopped(inactive)
                     }
                     else {
-                        Conversion::Active(self)
+                        Conversion::ActiveRegular(self)
                     }
                 }
 
@@ -2527,13 +2946,13 @@ macro_rules! adc {
                 /// Calling this before `wait_for_conversion_sequence`
                 /// should make that function return immediatly
                 pub fn is_conversion_done(&self) -> bool {
-                    !self.adc.is_conversion_active()
+                    !self.adc.is_regular_conversion_active()
                 }
 
                 /// Cancels an ongoing conversion
                 #[inline(always)]
                 pub fn cancel_conversion(mut self) -> Adc<stm32::$adc_type, Configured> {
-                    self.adc.cancel_conversion();
+                    self.adc.cancel_regular_conversion();
 
                     Adc {
                         adc: self.adc,
@@ -2544,13 +2963,55 @@ macro_rules! adc {
                 /// get current sample
                 #[inline(always)]
                 pub fn current_sample(&self) -> u16 {
-                    self.adc.current_sample()
+                    self.adc.current_regular_sample()
+                }
+
+                /// clear end conversion flag
+                #[inline(always)]
+                pub fn clear_end_of_conversion_flag(&mut self) {
+                    self.adc.clear_end_of_regular_conversion_flag();
+                }
+            }
+
+            impl Adc<stm32::$adc_type, ActiveInjected> {
+                /// Block until the conversion is completed and return to configured
+                pub fn wait_for_conversion_sequence(mut self) -> Adc<stm32::$adc_type, Configured> {
+                    self.adc.wait_for_injected_conversion_sequence();
+
+                    Adc {
+                        adc: self.adc,
+                        _status: PhantomData,
+                    }
+                }
+
+                /// Returns if a conversion has been completed
+                /// Calling this before `wait_for_conversion_sequence`
+                /// should make that function return immediatly
+                pub fn is_conversion_done(&self) -> bool {
+                    !self.adc.is_injected_conversion_active()
+                }
+
+                /// Cancels an ongoing conversion
+                #[inline(always)]
+                pub fn cancel_conversion(mut self) -> Adc<stm32::$adc_type, Configured> {
+                    self.adc.cancel_injected_conversion();
+
+                    Adc {
+                        adc: self.adc,
+                        _status: PhantomData,
+                    }
+                }
+
+                /// get current sample
+                #[inline(always)]
+                pub fn current_sample(&self, channel: config::InjectedSequence) -> u16 {
+                    self.adc.current_injected_sample(channel)
                 }
 
                 /// clear end conversion flag
                 #[inline(always)]
                 pub fn clear_end_conversion_flag(&mut self) {
-                    self.adc.clear_end_of_conversion_flag();
+                    self.adc.clear_end_of_injected_conversion_flag();
                 }
             }
 
@@ -2558,13 +3019,13 @@ macro_rules! adc {
                 /// Starts conversion sequence. Waits for the hardware to indicate it's actually started.
                 #[inline(always)]
                 pub fn start_conversion(&mut self) {
-                    self.adc.start_conversion()
+                    self.adc.start_regular_conversion()
                 }
 
                 /// Cancels an ongoing conversion
                 #[inline(always)]
                 pub fn cancel_conversion(&mut self) {
-                    self.adc.cancel_conversion()
+                    self.adc.cancel_regular_conversion()
                 }
 
                 /// Stop the Adc
@@ -2634,7 +3095,7 @@ macro_rules! adc {
     feature = "stm32g491",
     feature = "stm32g4a1",
 ))]
-adc!(ADC1 => (ExternalTrigger12, configure_clock_source12, DmaMuxResources::ADC1, (ADC12_COMMON) ));
+adc!(ADC1 => (ExternalTrigger12, InjectedExternalTrigger12, configure_clock_source12, DmaMuxResources::ADC1, (ADC12_COMMON) ));
 
 #[cfg(any(
     feature = "stm32g431",
@@ -2647,7 +3108,7 @@ adc!(ADC1 => (ExternalTrigger12, configure_clock_source12, DmaMuxResources::ADC1
     feature = "stm32g491",
     feature = "stm32g4a1",
 ))]
-adc!(ADC2 => (ExternalTrigger12, configure_clock_source12, DmaMuxResources::ADC2, (ADC12_COMMON) ));
+adc!(ADC2 => (ExternalTrigger12, InjectedExternalTrigger12, configure_clock_source12, DmaMuxResources::ADC2, (ADC12_COMMON) ));
 
 #[cfg(any(
     feature = "stm32g471",
