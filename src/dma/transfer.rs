@@ -41,6 +41,68 @@ macro_rules! transfer_def {
             PERIPHERAL: TargetAddress<DIR>,
             BUF: $Buffer<Word = <PERIPHERAL as TargetAddress<DIR>>::MemSize>,
         {
+            pub fn init_no_typestate(stream: &mut STREAM, peripheral: &PERIPHERAL, $($mut)* memory: BUF,
+                config: CONFIG) {
+                stream.disable();
+
+                fence(Ordering::SeqCst);
+
+                // Used in the case that we can constant `memory`
+                $($constraint)*
+
+                // Set peripheral to memory mode
+                stream.set_direction(DIR::direction());
+
+                // NOTE(unsafe) We now own this buffer and we won't call any &mut
+                // methods on it until the end of the DMA transfer
+                let (buf_ptr, buf_len) = unsafe { memory.$rw_buffer() };
+
+                // Set the memory address
+                //
+                // # Safety
+                //
+                // Must be a valid memory address
+                unsafe {
+                    stream.set_memory_address(
+                        buf_ptr as u32,
+                    );
+                }
+
+                // Set the peripheral address or the source address in memory-to-memory mode
+                //
+                // # Safety
+                //
+                // Must be a valid peripheral address or source address
+                unsafe {
+                    stream.set_peripheral_address(peripheral.address());
+                }
+
+                assert!(
+                    buf_len <= 65535,
+                    "Hardware does not support more than 65535 transfers"
+                );
+                let buf_len = buf_len as u16;
+                stream.set_number_of_transfers(buf_len);
+
+                // Set the DMAMUX request line if needed
+                if let Some(request_line) = PERIPHERAL::REQUEST_LINE {
+                    stream.set_request_line(request_line);
+                }
+
+                let msize = mem::size_of::<<PERIPHERAL as TargetAddress<DIR>>::MemSize>() / 2;
+
+                stream.clear_interrupts();
+
+                // NOTE(unsafe) These values are correct because of the
+                // invariants of TargetAddress
+                unsafe {
+                    stream.set_memory_size(msize as u8);
+                    stream.set_peripheral_size(msize as u8);
+                }
+
+                stream.apply_config(config);
+            }
+
             /// Configures the DMA source and destination and applies supplied
             /// configuration. In a memory to memory transfer, the `peripheral` argument
             /// is the source of the data.

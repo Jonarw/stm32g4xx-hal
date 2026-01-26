@@ -1,5 +1,7 @@
 //! Flash memory
 
+use defmt::Format;
+
 use crate::stm32::{flash, FLASH};
 
 use core::convert::TryInto;
@@ -18,7 +20,7 @@ pub const SZ_1K: u32 = 1024;
 
 pub type Result<T> = core::result::Result<T, Error>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd)]
+#[derive(Debug, Format, Clone, Copy, PartialEq, Eq, Ord, PartialOrd)]
 pub enum Error {
     AddressLargerThanFlash,
     AddressMisaligned,
@@ -280,9 +282,10 @@ impl<const SECTOR_SZ_KB: u32> FlashWriter<'_, SECTOR_SZ_KB> {
             let word2: u32;
 
             // Check if there is enough data to make 2 words, if there isn't, pad the data with 0xFF
-            if idx + 8 > data.len() {
+            let remaining_bytes = data.len() - idx;
+            if remaining_bytes < 8 {
                 let mut tmp_buffer = [255u8; 8];
-                tmp_buffer[idx..data.len()].copy_from_slice(&data[(idx + idx)..(data.len() + idx)]);
+                tmp_buffer[0..remaining_bytes].copy_from_slice(&data[idx..]);
                 let tmp_dword = u64::from_le_bytes(tmp_buffer);
                 word1 = tmp_dword as u32;
                 word2 = (tmp_dword >> 32) as u32;

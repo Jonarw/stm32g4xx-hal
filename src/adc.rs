@@ -54,14 +54,14 @@ impl Vref {
 
     /// Converts a sample value to millivolts using calibrated VDDA and configured resolution
     #[inline(always)]
-    pub fn sample_to_volts_ext(sample: u16, vdda: f32, resolution: config::Resolution) -> f32 {
+    pub fn sample_to_volts_ext(sample: u16, vdda: u32, resolution: config::Resolution) -> f32 {
         let mx_s = resolution.to_max_sample();
-        (f32::from(sample) * vdda) / mx_s as f32
+        (sample as u32 * vdda) as f32 / 1000f32 / mx_s as f32
     }
     /// Converts a sample value to volts using calibrated VDDA and configured resolution
     #[inline(always)]
     pub fn sample_to_volts(sample: u16) -> f32 {
-        Self::sample_to_volts_ext(sample, VDDA_CALIB as f32, config::Resolution::Twelve)
+        Self::sample_to_volts_ext(sample, VDDA_CALIB, config::Resolution::Twelve)
     }
 }
 
@@ -1808,7 +1808,7 @@ macro_rules! adc {
                 /// Converts a sample value to volts using calibrated VDDA and configured resolution
                 #[inline(always)]
                 pub fn sample_to_volts(&self, sample: u16) -> f32 {
-                    Vref::sample_to_volts_ext(sample, self.calibrated_vdda as f32, self.config.resolution)
+                    Vref::sample_to_volts_ext(sample, self.calibrated_vdda, self.config.resolution)
                 }
 
                 /// Disables the Voltage Regulator and release the ADC
@@ -1894,18 +1894,11 @@ macro_rules! adc {
                 /// Enables the adc
                 #[inline(always)]
                 pub fn enable(&mut self) {
-                    self.calibrate_all();
-                    self.apply_config(self.config);
 
-                    self.adc_reg.isr.modify(|_, w| w.adrdy().set_bit());
                     self.adc_reg.cr.modify(|_, w| w.aden().set_bit());
 
                     // Wait for adc to get ready
                     while !self.adc_reg.isr.read().adrdy().bit_is_set() {}
-
-                    // Clear ready flag
-                    self.adc_reg.isr.modify(|_, w| w.adrdy().set_bit());
-
                     self.clear_end_of_regular_conversion_flag();
                     self.clear_end_of_injected_conversion_flag();
                 }
@@ -2050,14 +2043,14 @@ macro_rules! adc {
                 #[inline(always)]
                 pub fn set_end_of_regular_conversion_interrupt(&mut self, eoc: config::Eoc) {
                     self.config.end_of_regular_conversion_interrupt = eoc;
-                    let (en, eocs) = match eoc {
+                    let (eos, eoc) = match eoc {
                         config::Eoc::Disabled => (false, false),
                         config::Eoc::Conversion => (true, true),
                         config::Eoc::Sequence => (true, false),
                     };
                     self.adc_reg.ier.modify(|_, w|w
-                        .eosie().bit(eocs)
-                        .eocie().bit(en)
+                        .eosie().bit(eos)
+                        .eocie().bit(eoc)
                     );
                 }
 
@@ -2066,14 +2059,14 @@ macro_rules! adc {
                 #[inline(always)]
                 pub fn set_end_of_injected_conversion_interrupt(&mut self, eoc: config::Eoc) {
                     self.config.end_of_injected_conversion_interrupt = eoc;
-                    let (en, eocs) = match eoc {
+                    let (eos, eoc) = match eoc {
                         config::Eoc::Disabled => (false, false),
                         config::Eoc::Conversion => (true, true),
                         config::Eoc::Sequence => (true, false),
                     };
                     self.adc_reg.ier.modify(|_, w|w
-                        .jeosie().bit(eocs)
-                        .jeocie().bit(en)
+                        .jeosie().bit(eos)
+                        .jeocie().bit(eoc)
                     );
                 }
 
@@ -2627,6 +2620,12 @@ macro_rules! adc {
                     self.enable()
                 }
 
+                /// Configures the adc
+                #[inline(always)]
+                pub fn configure(&mut self, config: config::AdcConfig<$regular_trigger_type, $injected_trigger_type>) {
+                    self.adc.apply_config(config);
+                }
+
                 /// enable the adc and configure for DMA.
                 /// panics if set to Dma::Disabled
                 #[inline(always)]
@@ -2857,7 +2856,7 @@ macro_rules! adc {
 
                 /// Starts injected conversion sequence. Waits for the hardware to indicate it's actually started.
                 #[inline(always)]
-                pub fn start_injected_conversion(mut self) -> Adc<stm32::$adc_type, ActiveInjected> {
+                pub fn start_injected_conversion(mut self) -> Self {
                     self.adc.clear_end_of_injected_conversion_flag();
                     self.adc.start_injected_conversion();
 
@@ -3018,14 +3017,38 @@ macro_rules! adc {
             impl Adc<stm32::$adc_type, DMA> {
                 /// Starts conversion sequence. Waits for the hardware to indicate it's actually started.
                 #[inline(always)]
-                pub fn start_conversion(&mut self) {
+                pub fn start_regular_conversion(&mut self) {
                     self.adc.start_regular_conversion()
+                }
+
+                /// Returns the current injected sample stored in the ADC data register
+                #[inline(always)]
+                pub fn current_injected_sample(&self, injected_channel: config::InjectedSequence) -> u16 {
+                    self.adc.current_injected_sample(injected_channel)
+                }
+
+                /// Starts injected conversion sequence. Waits for the hardware to indicate it's actually started.
+                #[inline(always)]
+                pub fn start_injected_conversion(mut self) -> Self {
+                    self.adc.clear_end_of_injected_conversion_flag();
+                    self.adc.start_injected_conversion();
+
+                    Adc {
+                        adc: self.adc,
+                        _status: PhantomData,
+                    }
                 }
 
                 /// Cancels an ongoing conversion
                 #[inline(always)]
-                pub fn cancel_conversion(&mut self) {
+                pub fn cancel_regular_conversion(&mut self) {
                     self.adc.cancel_regular_conversion()
+                }
+
+                /// Cancels an ongoing conversion
+                #[inline(always)]
+                pub fn cancel_injected_conversion(&mut self) {
+                    self.adc.cancel_injected_conversion()
                 }
 
                 /// Stop the Adc
@@ -3156,6 +3179,7 @@ adc_pins!(
     gpiob::PB11<Analog> => (ADC1, 14),
     gpiob::PB11<Analog> => (ADC2, 14),
     gpiob::PB12<Analog> => (ADC1, 11),
+    gpiob::PB14<Analog> => (ADC1, 5),
     gpiob::PB15<Analog> => (ADC2, 15),
 
     gpioc::PC0<Analog> => (ADC1, 6),
