@@ -2522,6 +2522,18 @@ macro_rules! adc {
                 pub fn sample_to_volts(&self, sample: u16) -> f32 {
                     self.adc.sample_to_volts(sample)
                 }
+
+                /// Gets VDDA
+                #[inline(always)]
+                pub fn set_vdda(&mut self, value: u32) {
+                    self.adc.calibrated_vdda = value;
+                }
+
+                /// Sets VDDA
+                #[inline(always)]
+                pub fn get_vdda(&self) -> u32 {
+                    self.adc.calibrated_vdda
+                }
             }
 
             impl Adc<stm32::$adc_type, PoweredDown> {
