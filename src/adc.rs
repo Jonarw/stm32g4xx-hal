@@ -1614,6 +1614,15 @@ pub trait AdcClaim<TYPE: TriggerType> {
         reset: bool,
     ) -> Adc<TYPE, Disabled>;
 
+    /// create a dynamic ADC instance from the stm32::Adc
+    fn claim_dynamic(
+        self,
+        cs: ClockSource,
+        rcc: &Rcc,
+        delay: &mut impl DelayNs,
+        reset: bool,
+    ) -> DynamicAdc<TYPE>;
+
     /// create an enabled ADC instance from the stm32::Adc
     fn claim_and_configure(
         self,
@@ -1911,7 +1920,7 @@ macro_rules! adc {
 
                 /// Applies all fields in AdcConfig
                 #[inline(always)]
-                fn apply_config(&mut self, config: config::AdcConfig<$regular_trigger_type, $injected_trigger_type>) {
+                pub fn apply_config(&mut self, config: config::AdcConfig<$regular_trigger_type, $injected_trigger_type>) {
                     self.set_clock_mode(config.clock_mode);
                     self.set_clock(config.clock);
                     self.set_resolution(config.resolution);
@@ -2235,6 +2244,18 @@ macro_rules! adc {
                     self.set_sample_time(channel, sample_time);
                 }
 
+                /// Sets VDDA
+                #[inline(always)]
+                pub fn set_vdda(&mut self, value: u32) {
+                    self.calibrated_vdda = value;
+                }
+
+                /// Gets VDDA
+                #[inline(always)]
+                pub fn get_vdda(&self) -> u32 {
+                    self.calibrated_vdda
+                }
+
                 /// Configure an injected channel for sampling.
                 /// It will make sure the sequence is at least as long as the `sequence` provided.
                 /// # Arguments
@@ -2495,6 +2516,26 @@ macro_rules! adc {
                     adc.power_up(delay)
                 }
 
+                #[inline(always)]
+                fn claim_dynamic(self, cs: ClockSource, rcc: &Rcc, delay: &mut impl DelayNs, reset: bool) -> DynamicAdc<stm32::$adc_type> {
+                    unsafe {
+                        let rcc_ptr = &(*stm32::RCC::ptr());
+                        stm32::$adc_type::enable(rcc_ptr);
+                        if reset {stm32::$adc_type::reset(rcc_ptr);}
+                    }
+
+                    Self::configure_clock_source(cs, rcc);
+
+                    let mut dynadc = DynamicAdc {
+                        config: config::AdcConfig::default(),
+                        adc_reg: self,
+                        calibrated_vdda: VDDA_CALIB,
+                    };
+
+                    dynadc.power_up(delay);
+                    dynadc
+                }
+
                 /// claims and configures the Adc
                 #[inline(always)]
                 fn claim_and_configure(self, cs: ClockSource, rcc: &Rcc, config: config::AdcConfig<$regular_trigger_type, $injected_trigger_type>, delay: &mut impl DelayNs, reset :bool) -> Adc<stm32::$adc_type, Configured> {
@@ -2521,18 +2562,6 @@ macro_rules! adc {
                 #[inline(always)]
                 pub fn sample_to_volts(&self, sample: u16) -> f32 {
                     self.adc.sample_to_volts(sample)
-                }
-
-                /// Gets VDDA
-                #[inline(always)]
-                pub fn set_vdda(&mut self, value: u32) {
-                    self.adc.calibrated_vdda = value;
-                }
-
-                /// Sets VDDA
-                #[inline(always)]
-                pub fn get_vdda(&self) -> u32 {
-                    self.adc.calibrated_vdda
                 }
             }
 
@@ -2868,14 +2897,9 @@ macro_rules! adc {
 
                 /// Starts injected conversion sequence. Waits for the hardware to indicate it's actually started.
                 #[inline(always)]
-                pub fn start_injected_conversion(mut self) -> Self {
+                pub fn start_injected_conversion(&mut self) {
                     self.adc.clear_end_of_injected_conversion_flag();
                     self.adc.start_injected_conversion();
-
-                    Adc {
-                        adc: self.adc,
-                        _status: PhantomData,
-                    }
                 }
 
                 /// Returns the current regular sample stored in the ADC data register
@@ -3033,6 +3057,12 @@ macro_rules! adc {
                     self.adc.start_regular_conversion()
                 }
 
+                /// Returns the current regular sample stored in the ADC data register
+                #[inline(always)]
+                pub fn current_regular_sample(&self) -> u16 {
+                    self.adc.current_regular_sample()
+                }
+
                 /// Returns the current injected sample stored in the ADC data register
                 #[inline(always)]
                 pub fn current_injected_sample(&self, injected_channel: config::InjectedSequence) -> u16 {
@@ -3041,14 +3071,9 @@ macro_rules! adc {
 
                 /// Starts injected conversion sequence. Waits for the hardware to indicate it's actually started.
                 #[inline(always)]
-                pub fn start_injected_conversion(mut self) -> Self {
+                pub fn start_injected_conversion(&mut self) {
                     self.adc.clear_end_of_injected_conversion_flag();
                     self.adc.start_injected_conversion();
-
-                    Adc {
-                        adc: self.adc,
-                        _status: PhantomData,
-                    }
                 }
 
                 /// Cancels an ongoing conversion
@@ -3098,6 +3123,17 @@ macro_rules! adc {
                 #[inline(always)]
                 fn address(&self) -> u32 {
                     self.adc.data_register_address()
+                }
+
+                type MemSize = u16;
+
+                const REQUEST_LINE: Option<u8> = Some($mux as u8);
+            }
+
+            unsafe impl TargetAddress<PeripheralToMemory> for DynamicAdc<stm32::$adc_type> {
+                #[inline(always)]
+                fn address(&self) -> u32 {
+                    self.data_register_address()
                 }
 
                 type MemSize = u16;
